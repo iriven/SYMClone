@@ -40,7 +40,7 @@ SYMCLONE_PROCESS_ID="${BASHPID}"
 SYMCLONE_PROCESS_RUNTIME=$(date +'%Y%m%d')
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
 then
-  printf "\\n%s is a part of bash Fylesystem Backup Libraries file. Dont execute it directly!\\n\\n" "${0##*/}"
+  printf "\\n%s is a part of Iriven Storage Device Clone tool for EMC VMAX Storage Array. Dont execute it directly!\\n\\n" "${0##*/}"
   exit 1
 fi
 #-------------------------------------------------------------------
@@ -58,6 +58,8 @@ fi
 : ${SYMCLONE_SOURCE_DEVICE_ALIAS:-SRC_VOL}
 : ${SYMCLONE_TARGET_DEVICE_ALIAS:-TGT_VOL}
 : ${SYMCLONE_DEVICEGROUP_NAME:-}
+: ${SYMCLONE_DEVICEGROUP_TYPE:-regular}
+: ${SYMCLONE_DEVICEGROUP_RDFVERSION:-}
 : ${SYMCLONE_COMMAND_SCOPE:-ENABLE}
 : ${SYMCLONE_SESSION_STATUS:-}
 : ${SYMCLONE_TARGET_STORAGEGROUP:-}
@@ -101,6 +103,7 @@ ValidateUserSettings "${SYMCLONE_CONFIG_FILE}"
 [ -z "${SYMCLONE_SOURCE_DEVICE_ALIAS}" ]    && writeLog "Parametre SYMCLONE_SOURCE_DEVICE_ALIAS manquant";
 [ -z "${SYMCLONE_TARGET_DEVICE_ALIAS}" ]    && writeLog "Parametre SYMCLONE_TARGET_DEVICE_ALIAS manquant";
 [ -z "${SYMCLONE_DEVICEGROUP_NAME}" ]       && writeLog "Parametre SYMCLONE_DEVICEGROUP_NAME manquant";
+[ -z "${SYMCLONE_DEVICEGROUP_TYPE}" ]       && writeLog "Parametre SYMCLONE_DEVICEGROUP_TYPE manquant";
 [ -z "${SYMCLONE_TARGET_STORAGEGROUP}" ]    && writeLog "Parametre SYMCLONE_TARGET_STORAGEGROUP manquant";
 
 # PARAMETER VALIDATION
@@ -108,6 +111,27 @@ ValidateUserSettings "${SYMCLONE_CONFIG_FILE}"
 writeLog "VALIDATION DES PARAMETRES DE CONFIGURATION" "info";
 
 [ $(strLen "${SYMCLONE_ARRAY_SID}") -lt 8 ] && writeLog "Le Parametre SYMCLONE_ARRAY_SID doit avoir au moins 8 caractere";
+
+case "${SYMCLONE_DEVICEGROUP_TYPE}" in
+    [Rr][Ee][Gg]*) SYMCLONE_DEVICEGROUP_TYPE="regular"
+      ;;
+    [Rr][Dd][Ff]*) SYMCLONE_DEVICEGROUP_TYPE="rdf"
+      ;;
+    *)
+      writeLog "Unsupported device group type configured, exiting. 180"
+      ;;
+  esac
+
+if [ "${SYMCLONE_DEVICEGROUP_TYPE}" == "rdf" ]; then
+    [ -z "${SYMCLONE_DEVICEGROUP_RDFVERSION}" ]   && writeLog "Parametre SYMCLONE_DEVICEGROUP_RDFVERSION manquant";
+    case "${SYMCLONE_DEVICEGROUP_RDFVERSION}" in
+        1|2) ;;
+        *)
+          writeLog "invalid RDF device Version, exiting. 180"
+          ;;
+      esac
+      SYMCLONE_DEVICEGROUP_TYPE="${SYMCLONE_DEVICEGROUP_TYPE}${SYMCLONE_DEVICEGROUP_RDFVERSION}"
+fi
 StorageArrayExists "${SYMCLONE_ARRAY_SID}" || writeLog "L'Identifiant de la baie est invalide: ${SYMCLONE_ARRAY_SID}";
 
 DeviceExists "${SYMCLONE_SOURCE_DEVICE}" "${SYMCLONE_ARRAY_SID}"    || writeLog "La LUN ${SYMCLONE_SOURCE_DEVICE} n'existe pas sur la Baie";
@@ -116,8 +140,12 @@ SGExists "${SYMCLONE_TARGET_STORAGEGROUP}" "${SYMCLONE_ARRAY_SID}"  || writeLog 
 
 SYMCLONE_SOURCE_DEVICE_SIZE=$(getDeviceSize "${SYMCLONE_SOURCE_DEVICE}" "${SYMCLONE_ARRAY_SID}")
 SYMCLONE_TARGET_DEVICE_SIZE=$(getDeviceSize "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_ARRAY_SID}")
+SYMCLONE_SOURCE_DEVICE_PROPERTIES=$(getDeviceProperties "${SYMCLONE_SOURCE_DEVICE}"  "${SYMCLONE_ARRAY_SID}")
+SYMCLONE_TARGET_DEVICE_PROPERTIES=$(getDeviceProperties "${SYMCLONE_TARGET_DEVICE}"  "${SYMCLONE_ARRAY_SID}")
 
 numberCompare "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_SOURCE_DEVICE}" ">=" ||  writeLog "La taille de la LUN source ne peut etre superieure à celle de destination";
+[ "${SYMCLONE_SOURCE_DEVICE_PROPERTIES}" == "${SYMCLONE_TARGET_DEVICE_PROPERTIES}" ] ||  writeLog "La topologie du device source doit etre identique à celle du device de destination";
+
 writeLog "INITIALISATION DE LA SESSION DE CLONE" "info";
 
 if dgExists "${SYMCLONE_DEVICEGROUP_NAME}" ; then
@@ -128,10 +156,10 @@ if dgExists "${SYMCLONE_DEVICEGROUP_NAME}" ; then
 
 else
     writeLog "CREATION DU DEVICE GROUP: ${SYMCLONE_DEVICEGROUP_NAME}" "info";
-    symdg create "${SYMCLONE_DEVICEGROUP_NAME}" -type regular || writeLog "Unable to create device group. please check logs for more information"; 
-    writeLog "AJOUT DU DEVICE ${SYMCLONE_SOURCE_DEVICE} DANS LE DG" "info";
+    symdg create "${SYMCLONE_DEVICEGROUP_NAME}" -type "${SYMCLONE_DEVICEGROUP_TYPE}" || writeLog "Unable to create device group. please check logs for more information"; 
+    writeLog "AJOUT DU DEVICE ${SYMCLONE_SOURCE_DEVICE} DANS LE DG: ${SYMCLONE_DEVICEGROUP_NAME}" "info";
     symdg -g "${SYMCLONE_DEVICEGROUP_NAME}" -sid "${SYMCLONE_ARRAY_SID}" add dev "${SYMCLONE_SOURCE_DEVICE}" "${SYMCLONE_SOURCE_DEVICE_ALIAS}"
-    writeLog "AJOUT DU DEVICE ${SYMCLONE_TARGET_DEVICE} DANS LE DG" "info";
+    writeLog "AJOUT DU DEVICE ${SYMCLONE_TARGET_DEVICE} DANS LE DG: ${SYMCLONE_DEVICEGROUP_NAME}" "info";
     symdg -g "${SYMCLONE_DEVICEGROUP_NAME}" -sid "${SYMCLONE_ARRAY_SID}" add dev "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_TARGET_DEVICE_ALIAS}" -tgt
     writeLog "CREATION DE LA SESSION DE CLONAGE DU DEVICE ${SYMCLONE_SOURCE_DEVICE} VERS ${SYMCLONE_TARGET_DEVICE}" "info";
     symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" -copy -differential create "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
@@ -145,15 +173,14 @@ symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" activate "${SYMCLONE_SOURCE_DEVICE_AL
 while [ "${SYMCLONE_SESSION_STATUS}" != "finished" ]
 do
   SYMCLONE_SESSION_STATUS=$(CloneSessionStatus "${SYMCLONE_DEVICEGROUP_NAME}")
-  symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" query -gb
+  MonitorCloneSession "${SYMCLONE_DEVICEGROUP_NAME}"
   if [ $? -ne 0 ]; then break; fi
   sleep 5
 done
 wait
-
+sleep 2
 if [ "${SYMCLONE_SESSION_STATUS}" == "finished" ]; then 
   writeLog "FINALISATION DE LA COPIE" "info";
-  sleep 5
   symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" terminate "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
   wait
 fi
