@@ -37,7 +37,7 @@
 # set -x
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
 then
-  printf "\\n%s is a part of bash Fylesystem Backup Libraries file. Dont execute it directly!\\n\\n" "${0##*/}"
+  printf "\\n%s is a part of Iriven Storage Device Clone tool for EMC VMAX Storage Array. Dont execute it directly!\\n\\n" "${0##*/}"
   exit 1
 fi
 #-------------------------------------------------------------------
@@ -199,4 +199,21 @@ function CloneSessionStatus(){
   symclone -g "${dgname}" -Copied verify  >/dev/null 2>&1
   [ $? -eq 0 ] && status="finished"
   echo "${status}"
+}
+
+function MonitorCloneSession(){
+  local dgname="${1}"
+  if dgExists "${dgname}"; then
+      symclone -g "${dgname}" query -gb
+    [ $? -eq 0 ] && return 0 
+  fi
+  return 1
+}
+
+function getDeviceProperties()
+{
+  local lunid="${1}"
+  local sid="${2}"
+  local sum=$(printf '%s' $(symdev -sid ${sid} show "${lunid}" | egrep '(Mega|Stripe|Configuration|RDF)') | md5sum | awk '{print $1}')
+  echo "${sum}"
 }
