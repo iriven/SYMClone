@@ -41,12 +41,6 @@ then
   exit 1
 fi
 #-------------------------------------------------------------------
-#               DECLARATION DES VARIABLES
-#-------------------------------------------------------------------
-SYMCLONE_COMMON_LIBFILE="${SYMCLONE_HELPER_DIRECTORY}/Common.lib.sh"
-SYMCLONE_VMAX_LIBFILE="${SYMCLONE_HELPER_DIRECTORY}/Symmetrix.lib.sh"
-
-#-------------------------------------------------------------------
 #               DECLARATION DES FUNCTIONS
 #-------------------------------------------------------------------
 function require()
@@ -57,11 +51,6 @@ function require()
         exit 1
    fi
 }
-
-
-#-------------------------------------------------------------------
-#               DECLARATION DES FUNCTIONS
-#-------------------------------------------------------------------
 
 function isBoolean()
 {  
@@ -188,7 +177,6 @@ function SGExists(){
 	[ -z "${check}" ] && return 1 || return 0
 }
 
-
 function getDeviceSize(){
 	local lunid="${1}"
 	local sid="${2}"
@@ -205,9 +193,10 @@ function IsStorageGroupMember(){
 	[ -z "${check}" ] && return 1 || return 0	
 }
 
-function CloneSessionFinished(){
+function CloneSessionStatus(){
 	local dgname="${1}"
-	[ -z "${sgname}" ] && return 0
-	symclone -g "${sgname}" verify -copied >/dev/null 2>&1
-	[ $? -eq 0 ] && return 0 || return 1
+  local status="inprogress"
+	symclone -g "${dgname}" -Copied verify  >/dev/null 2>&1
+  [ $? -eq 0 ] && status="finished"
+  echo "${status}"
 }
