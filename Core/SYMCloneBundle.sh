@@ -43,7 +43,6 @@ then
   printf "\\n%s is a part of bash Fylesystem Backup Libraries file. Dont execute it directly!\\n\\n" "${0##*/}"
   exit 1
 fi
-
 #-------------------------------------------------------------------
 #               DECLARATION DES VARIABLES
 #-------------------------------------------------------------------
@@ -60,7 +59,7 @@ fi
 : ${SYMCLONE_TARGET_DEVICE_ALIAS:-TGT_VOL}
 : ${SYMCLONE_DEVICEGROUP_NAME:-}
 : ${SYMCLONE_COMMAND_SCOPE:-ENABLE}
-: ${SYMCLONE_INPROGRESS_STATUS:-}
+: ${SYMCLONE_SESSION_STATUS:-}
 : ${SYMCLONE_TARGET_STORAGEGROUP:-}
 
 #  SYSTEMES DE FICHIERS
@@ -96,12 +95,12 @@ ValidateUserSettings "${SYMCLONE_CONFIG_FILE}"
 . ${SYMCLONE_CONTROL_FILE}
 . ${SYMCLONE_ENV_FILE}
 
-[ -z "${SYMCLONE_ARRAY_SID}" ]   			&& writeLog "Parametre SYMCLONE_ARRAY_SID manquant";
-[ -z "${SYMCLONE_SOURCE_DEVICE}" ]   		&& writeLog "Parametre SYMCLONE_SOURCE_DEVICE manquant";
-[ -z "${SYMCLONE_TARGET_DEVICE}" ]   		&& writeLog "Parametre SYMCLONE_TARGET_DEVICE manquant";
-[ -z "${SYMCLONE_SOURCE_DEVICE_ALIAS}" ]   	&& writeLog "Parametre SYMCLONE_SOURCE_DEVICE_ALIAS manquant";
-[ -z "${SYMCLONE_TARGET_DEVICE_ALIAS}" ]   	&& writeLog "Parametre SYMCLONE_TARGET_DEVICE_ALIAS manquant";
-[ -z "${SYMCLONE_DEVICEGROUP_NAME}" ]   	&& writeLog "Parametre SYMCLONE_DEVICEGROUP_NAME manquant";
+[ -z "${SYMCLONE_ARRAY_SID}" ]              && writeLog "Parametre SYMCLONE_ARRAY_SID manquant";
+[ -z "${SYMCLONE_SOURCE_DEVICE}" ]          && writeLog "Parametre SYMCLONE_SOURCE_DEVICE manquant";
+[ -z "${SYMCLONE_TARGET_DEVICE}" ]          && writeLog "Parametre SYMCLONE_TARGET_DEVICE manquant";
+[ -z "${SYMCLONE_SOURCE_DEVICE_ALIAS}" ]    && writeLog "Parametre SYMCLONE_SOURCE_DEVICE_ALIAS manquant";
+[ -z "${SYMCLONE_TARGET_DEVICE_ALIAS}" ]    && writeLog "Parametre SYMCLONE_TARGET_DEVICE_ALIAS manquant";
+[ -z "${SYMCLONE_DEVICEGROUP_NAME}" ]       && writeLog "Parametre SYMCLONE_DEVICEGROUP_NAME manquant";
 [ -z "${SYMCLONE_TARGET_STORAGEGROUP}" ]    && writeLog "Parametre SYMCLONE_TARGET_STORAGEGROUP manquant";
 
 # PARAMETER VALIDATION
@@ -124,12 +123,17 @@ writeLog "INITIALISATION DE LA SESSION DE CLONE" "info";
 if dgExists "${SYMCLONE_DEVICEGROUP_NAME}" ; then
     isDGMember "${SYMCLONE_SOURCE_DEVICE}" "${SYMCLONE_DEVICEGROUP_NAME}" || writeLog "La LUN ${SYMCLONE_SOURCE_DEVICE} n'est pas membre du DG ${SYMCLONE_DEVICEGROUP_NAME}";
     isDGMember "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_DEVICEGROUP_NAME}" || writeLog "La LUN ${SYMCLONE_TARGET_DEVICE} n'est pas membre du DG ${SYMCLONE_DEVICEGROUP_NAME}";
-    symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" -copy recreate "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
-else
-    symdg create "${SYMCLONE_DEVICEGROUP_NAME}" -type regular || writeLog "Unable to create device group. please check logs for more information"; 
-    symdg -g "${SYMCLONE_DEVICEGROUP_NAME}" -sid "${SYMCLONE_ARRAY_SID}" add dev "${SYMCLONE_SOURCE_DEVICE}" "${SYMCLONE_SOURCE_DEVICE_ALIAS}"
-    symdg -g "${SYMCLONE_DEVICEGROUP_NAME}" -sid "${SYMCLONE_ARRAY_SID}" add dev "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_TARGET_DEVICE_ALIAS}" -tgt
+    writeLog "REFRESH DE LA SESSION DE CLONAGE DU DEVICE ${SYMCLONE_SOURCE_DEVICE} VERS ${SYMCLONE_TARGET_DEVICE}" "info";
+    symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" recreate "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
 
+else
+    writeLog "CREATION DU DEVICE GROUP: ${SYMCLONE_DEVICEGROUP_NAME}" "info";
+    symdg create "${SYMCLONE_DEVICEGROUP_NAME}" -type regular || writeLog "Unable to create device group. please check logs for more information"; 
+    writeLog "AJOUT DU DEVICE ${SYMCLONE_SOURCE_DEVICE} DANS LE DG" "info";
+    symdg -g "${SYMCLONE_DEVICEGROUP_NAME}" -sid "${SYMCLONE_ARRAY_SID}" add dev "${SYMCLONE_SOURCE_DEVICE}" "${SYMCLONE_SOURCE_DEVICE_ALIAS}"
+    writeLog "AJOUT DU DEVICE ${SYMCLONE_TARGET_DEVICE} DANS LE DG" "info";
+    symdg -g "${SYMCLONE_DEVICEGROUP_NAME}" -sid "${SYMCLONE_ARRAY_SID}" add dev "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_TARGET_DEVICE_ALIAS}" -tgt
+    writeLog "CREATION DE LA SESSION DE CLONAGE DU DEVICE ${SYMCLONE_SOURCE_DEVICE} VERS ${SYMCLONE_TARGET_DEVICE}" "info";
     symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" -copy -differential create "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
 fi
 
@@ -138,18 +142,25 @@ symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" activate "${SYMCLONE_SOURCE_DEVICE_AL
 
 #  VERIFICATION DE LA PROGRESSION DE LA COPIE
 #---------------------------------------------
-until $(CloneSessionFinished "${SYMCLONE_DEVICEGROUP_NAME}")
+while [ "${SYMCLONE_SESSION_STATUS}" != "finished" ]
 do
-    symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" query -gb
-    sleep 5
+  SYMCLONE_SESSION_STATUS=$(CloneSessionStatus "${SYMCLONE_DEVICEGROUP_NAME}")
+  symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" query -gb
+  if [ $? -ne 0 ]; then break; fi
+  sleep 5
 done
 wait
-writeLog "FINALISATION DE LA COPIE" "info";
-symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" terminate "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
-wait
+
+if [ "${SYMCLONE_SESSION_STATUS}" == "finished" ]; then 
+  writeLog "FINALISATION DE LA COPIE" "info";
+  sleep 5
+  symclone -g "${SYMCLONE_DEVICEGROUP_NAME}" terminate "${SYMCLONE_SOURCE_DEVICE_ALIAS}" SYM LD "${SYMCLONE_TARGET_DEVICE_ALIAS}"  -nop
+  wait
+fi
 
 if ! IsStorageGroupMember "${SYMCLONE_TARGET_DEVICE}" "${SYMCLONE_TARGET_STORAGEGROUP}" "${SYMCLONE_ARRAY_SID}"; then
   writeLog "AJOUT DE LA LUN: ${SYMCLONE_TARGET_DEVICE} AU STORAGE GROUP: ${SYMCLONE_TARGET_STORAGEGROUP}" "info";
   symaccess -sid "${SYMCLONE_ARRAY_SID}" -name "${SYMCLONE_TARGET_STORAGEGROUP}" -type storage add devs "${SYMCLONE_TARGET_DEVICE}"
   symsg -sid "${SYMCLONE_ARRAY_SID}" -sg "${SYMCLONE_TARGET_STORAGEGROUP}" set -slo Diamond
 fi
+writeLog "OPERATION TERMINEE AVEC SUCCES" "info";
