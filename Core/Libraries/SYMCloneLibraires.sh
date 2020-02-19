@@ -194,9 +194,9 @@ function IsStorageGroupMember(){
 }
 
 function CloneSessionStatus(){
-	local dgname="${1}"
+  local dgname="${1}"
   local status="inprogress"
-	symclone -g "${dgname}" -Copied verify  >/dev/null 2>&1
+  symclone -g "${dgname}" -Copied verify  >/dev/null 2>&1
   [ $? -eq 0 ] && status="finished"
   echo "${status}"
 }
