@@ -1,2 +1,2 @@
 # SYMClone
-EMC Symmetrix Device Cloner Tool written in bash
+A Symmetrix Device Cloneer Tool for EMC VMAX Storage Array (written in bash)
